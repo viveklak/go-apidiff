@@ -22,7 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/joelanford/go-apidiff/pkg/diff"
+	"github.com/viveklak/go-apidiff/pkg/diff"
 )
 
 func main() {
@@ -93,6 +93,7 @@ and HEAD is used for newCommit."`,
 	cmd.Flags().StringVar(&opts.RepoPath, "repo-path", cwd, "Path to root of git repository to compare")
 	cmd.Flags().BoolVar(&opts.CompareImports, "compare-imports", false, "Compare exported API differences of the imports in the repo. ")
 	cmd.Flags().BoolVar(&printCompatible, "print-compatible", false, "Print compatible API changes")
+	cmd.Flags().StringSliceVar(&opts.APIPackages, "api-packages", nil, "Restrict API diff to specific packages")
 
 	return cmd
 }

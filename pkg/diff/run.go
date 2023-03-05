@@ -28,7 +28,7 @@ import (
 	"golang.org/x/exp/apidiff"
 	"golang.org/x/tools/go/packages"
 
-	"github.com/joelanford/go-apidiff/pkg/diff/internal/osfs"
+	"github.com/viveklak/go-apidiff/pkg/diff/internal/osfs"
 )
 
 type Options struct {
@@ -36,6 +36,10 @@ type Options struct {
 	OldCommit      string
 	NewCommit      string
 	CompareImports bool
+	// API packages restricts the API compatibility check to just
+	// select packages instead of the entire repo's exported interface.
+	// If this is empty, the default semantics API diff is enabled.
+	APIPackages []string
 }
 
 func Run(opts Options) (*Diff, error) {
@@ -79,12 +83,12 @@ func Run(opts Options) (*Diff, error) {
 		}
 	}()
 
-	selfOld, importsOld, err := getPackages(*wt, *oldHash)
+	selfOld, importsOld, err := getPackages(*wt, *oldHash, opts.APIPackages)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get packages from old commit %q (%s): %w", opts.OldCommit, oldHash, err)
 	}
 
-	selfNew, importsNew, err := getPackages(*wt, *newHash)
+	selfNew, importsNew, err := getPackages(*wt, *newHash, opts.APIPackages)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get packages from new commit %q (%s): %w", opts.NewCommit, newHash, err)
 	}
@@ -174,7 +178,7 @@ func getHashes(repo *git.Repository, oldRev, newRev plumbing.Revision) (*plumbin
 	return oldCommitHash, newCommitHash, nil
 }
 
-func getPackages(wt git.Worktree, hash plumbing.Hash) (map[string]*packages.Package, map[string]*packages.Package, error) {
+func getPackages(wt git.Worktree, hash plumbing.Hash, apiPkgs []string) (map[string]*packages.Package, map[string]*packages.Package, error) {
 	if err := wt.Checkout(&git.CheckoutOptions{Hash: hash, Force: true}); err != nil {
 		return nil, nil, err
 	}
@@ -190,11 +194,12 @@ func getPackages(wt git.Worktree, hash plumbing.Hash) (map[string]*packages.Pack
 		goFlags = "-mod=vendor"
 	}
 	cfg := packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes,
+		Mode: packages.NeedTypes | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedDeps,
 		Tests:      false,
 		BuildFlags: []string{goFlags},
 	}
+
 	pkgs, err := packages.Load(&cfg, "./...")
 	if err != nil {
 		return nil, nil, err
@@ -203,6 +208,18 @@ func getPackages(wt git.Worktree, hash plumbing.Hash) (map[string]*packages.Pack
 	selfPkgs := make(map[string]*packages.Package)
 	importPkgs := make(map[string]*packages.Package)
 	for _, pkg := range pkgs {
+		if len(apiPkgs) > 0 {
+			found := false
+			for _, p := range apiPkgs {
+				if strings.HasPrefix(pkg.PkgPath, p) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
 		// skip internal packages since they do not contain public APIs
 		if strings.HasSuffix(pkg.PkgPath, "/internal") || strings.Contains(pkg.PkgPath, "/internal/") {
 			continue
